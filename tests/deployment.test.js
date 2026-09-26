@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 // Deployment scripts are JavaScript so they can run before dependencies/builds.
 import {
@@ -18,11 +18,23 @@ function config() {
   return c;
 }
 describe("portable deployment policy", () => {
+  afterEach(() => vi.unstubAllEnvs());
   it("accepts independently named resources and defaults to free", () => {
     const c = config();
+    // Deploy passes the real account to subprocesses; this fixture uses its own.
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", undefined);
     delete c.billingMode;
     expect(validateDeployment(c)).toBe("free");
     expect(deploymentEnv(c).CLOUDFLARE_ACCOUNT_ID).toBe(c.accountId);
+  });
+  it("accepts a matching account environment and rejects a different account", () => {
+    const c = config();
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", c.accountId);
+    expect(deploymentEnv(c).CLOUDFLARE_ACCOUNT_ID).toBe(c.accountId);
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "b".repeat(32));
+    expect(() => deploymentEnv(c)).toThrow(
+      "CLOUDFLARE_ACCOUNT_ID does not match deployment accountId",
+    );
   });
   it("requires complete hosting configuration and keeps the model key out of config", () => {
     const c = config();
