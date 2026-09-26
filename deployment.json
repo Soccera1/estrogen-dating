@@ -1,0 +1,30 @@
+{
+  "accountId": "b1a50b5b58be16e64e83a265381c8a6d",
+  "worker": {
+    "name": "estrogen-dating",
+    "compatibilityDate": "2026-09-25",
+    "assets": {
+      "notFoundHandling": "single-page-application",
+      "runWorkerFirst": ["/api/*", "/auth/*"]
+    },
+    "domains": ["edating.soccera.uk"],
+    "workersDev": false,
+    "previewUrls": false,
+    "observability": { "enabled": false },
+    "unsafe": { "metadata": { "usage_model": "standard" } },
+    "env": {
+      "DB": {
+        "type": "d1",
+        "name": "estrogen-dating-db",
+        "id": "c947cb5b-b867-4d61-a8ee-37b8283ee37d"
+      },
+      "ASSETS": { "type": "assets" },
+      "APP_ORIGIN": { "type": "text", "value": "https://edating.soccera.uk" },
+      "HRTID_ISSUER": {
+        "type": "text",
+        "value": "https://id.estrogen.delivery"
+      },
+      "HRTID_CLIENT_ID": { "type": "text", "value": "1nlkpqNdrH4z1BlfGse9sA" }
+    }
+  }
+}
