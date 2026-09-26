@@ -478,7 +478,7 @@ app.onError((error, c) => {
   return c.json(
     {
       error:
-        "Service temporarily unavailable or free capacity reached. Your draft is safe; please retry later.",
+        "Service temporarily unavailable or capacity reached. Your draft is safe; please retry later.",
     },
     503,
   );

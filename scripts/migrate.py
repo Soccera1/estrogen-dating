@@ -12,8 +12,9 @@ import sqlite3
 import subprocess
 import tempfile
 
-config = json.loads(pathlib.Path('deployment.json').read_text())
+config = json.loads(pathlib.Path(os.environ.get('DEPLOYMENT_CONFIG', 'deployment.local.json' if pathlib.Path('deployment.local.json').exists() else 'deployment.json')).read_text())
 database = config['worker']['env']['DB']['id']
+os.environ['CLOUDFLARE_ACCOUNT_ID'] = config['accountId']
 installed = pathlib.Path.home() / '.npm-global/bin/cf'
 cf = os.environ.get('CF_BIN', str(installed) if installed.exists() else 'cf')
 

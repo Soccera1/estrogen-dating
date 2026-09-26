@@ -10,9 +10,11 @@
     "test": "vitest run",
     "test:browser": "node tests/browser.mjs",
     "test:cpu": "node tests/avatar-cpu.mjs",
-    "migrate": "npm run check:free && python3 scripts/migrate.py",
+    "migrate": "node scripts/migrate.mjs",
     "check:free": "node scripts/check-free.mjs",
-    "deploy": "node scripts/deploy.mjs"
+    "deploy": "node scripts/deploy.mjs",
+    "check:deployment": "node scripts/check-deployment.mjs",
+    "configure": "python3 scripts/configure.py"
   },
   "dependencies": {
     "hono": "^4.12.0",

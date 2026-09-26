@@ -1,0 +1,72 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+// Deployment scripts are JavaScript so they can run before dependencies/builds.
+import {
+  validateDeployment,
+  validateSubscriptions,
+  deploymentEnv,
+} from "../scripts/deployment-config.mjs";
+function config() {
+  const c = JSON.parse(readFileSync("deployment.json", "utf8"));
+  c.accountId = "a".repeat(32);
+  c.worker.name = "another-instance";
+  c.worker.env.DB.name = "another-database";
+  c.worker.env.DB.id = "12345678-1234-1234-1234-123456789abc";
+  c.worker.env.APP_ORIGIN.value =
+    "https://another-instance.example.workers.dev";
+  c.worker.env.HRTID_CLIENT_ID.value = "independent-client";
+  return c;
+}
+describe("portable deployment policy", () => {
+  it("accepts independently named resources and defaults to free", () => {
+    const c = config();
+    delete c.billingMode;
+    expect(validateDeployment(c)).toBe("free");
+    expect(deploymentEnv(c).CLOUDFLARE_ACCOUNT_ID).toBe(c.accountId);
+  });
+  it("supports custom domains", () => {
+    const c = config();
+    c.worker.domains = ["dating.example.com"];
+    c.worker.workersDev = false;
+    c.worker.env.APP_ORIGIN.value = "https://dating.example.com";
+    expect(validateDeployment(c)).toBe("free");
+  });
+  it("requires explicit paid opt-in and preserves strict free checks", () => {
+    const c = config();
+    c.billingMode = "paid";
+    expect(validateDeployment(c)).toBe("paid");
+    expect(() => validateDeployment(c, { forceFree: true })).toThrow();
+    c.billingMode = "paidd";
+    expect(() => validateDeployment(c)).toThrow();
+  });
+  it("rejects placeholders, origin mismatches and extra resources even when paid", () => {
+    expect(() =>
+      validateDeployment(JSON.parse(readFileSync("deployment.json", "utf8"))),
+    ).toThrow();
+    const c = config();
+    c.worker.env.APP_ORIGIN.value += "/";
+    expect(() => validateDeployment(c)).toThrow();
+    c.worker.env.APP_ORIGIN.value = "https://wrong.example.com";
+    expect(() => validateDeployment(c)).toThrow();
+    const paid = config();
+    paid.billingMode = "paid";
+    paid.worker.env.AI = { type: "ai" };
+    expect(() => validateDeployment(paid)).toThrow();
+  });
+  it("fails closed on paid, unknown or malformed subscription responses", () => {
+    expect(() => validateSubscriptions([])).not.toThrow();
+    expect(() =>
+      validateSubscriptions([{ state: "Expired", price: 5 }]),
+    ).not.toThrow();
+    for (const response of [
+      {},
+      [null],
+      [{}],
+      [{ state: "Active", price: "unknown" }],
+      [{ state: "Active", price: 5 }],
+      [{ state: "Active", price: 0, name: "Workers Paid" }],
+    ]) {
+      expect(() => validateSubscriptions(response)).toThrow();
+    }
+  });
+});

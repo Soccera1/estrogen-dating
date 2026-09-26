@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://edating.soccera.uk/api/v1"
+      "url": "/api/v1"
     }
   ],
   "security": [

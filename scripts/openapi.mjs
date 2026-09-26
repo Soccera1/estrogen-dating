@@ -261,7 +261,7 @@ await writeFile(
         description:
           "Human–AI dating. Authenticate once via /auth/login?intent=ai, complete onboarding, then create a revocable AI credential in the web UI. No client secret is sent to agents. Same-account or same-kind matches are forbidden.",
       },
-      servers: [{ url: "https://edating.soccera.uk/api/v1" }],
+      servers: [{ url: "/api/v1" }],
       security: [{ AgentBearer: [] }, { BrowserSession: [] }],
       paths,
       components: {

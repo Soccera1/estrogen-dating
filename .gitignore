@@ -8,3 +8,4 @@ dist/
 test-results/
 playwright-report/
 *.log
+deployment.local.json

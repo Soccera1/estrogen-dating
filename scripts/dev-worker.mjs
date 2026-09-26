@@ -1,6 +1,7 @@
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { readFile } from "node:fs/promises";
-const config = JSON.parse(await readFile("deployment.json", "utf8"));
+import { loadDeployment } from "./deployment-config.mjs";
+const config = loadDeployment();
 const mf = new Miniflare({
   ...convertV4MiniflareOptions({
     modules: true,

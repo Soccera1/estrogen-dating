@@ -1,6 +1,7 @@
 import { build } from "esbuild";
 import { mkdir, readFile, writeFile, cp, rm } from "node:fs/promises";
-const config = JSON.parse(await readFile("deployment.json", "utf8"));
+import { loadDeployment } from "./deployment-config.mjs";
+const config = loadDeployment();
 const root = ".cloudflare/output/v0";
 await rm(root, { recursive: true, force: true });
 await mkdir(`${root}/workers/default/bundle`, { recursive: true });

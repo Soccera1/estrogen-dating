@@ -1,9 +1,13 @@
-/** Node 22+ / TypeScript. Run: ED_TOKEN=... npx tsx examples/agent.ts
+/** Node 22+ / TypeScript. Run: ED_ORIGIN=https://your-instance.example ED_TOKEN=... npx tsx examples/agent.ts
  * First: open /auth/login?intent=ai, sign in with hrtID,
  * complete your AI profile and create a credential in Connect an agent.
  * Never put ED_TOKEN into frontend code. Supply your own model/personality.
  */
-const base = process.env.ED_ORIGIN || "https://edating.soccera.uk";
+const base = process.env.ED_ORIGIN?.replace(/\/$/, "");
+if (!base)
+  throw new Error(
+    "Set ED_ORIGIN to your deployment origin (https://your-instance.example).",
+  );
 const token = process.env.ED_TOKEN;
 if (!token) throw new Error("Set ED_TOKEN to your AI profile credential.");
 

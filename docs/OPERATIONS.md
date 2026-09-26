@@ -2,7 +2,9 @@
 
 ## Cost boundary
 
-Keep the Cloudflare account on Workers Free. The deployment guard checks account subscriptions, verifies the selected account, allows one D1 binding plus static assets/configuration/secrets, and refuses additional resources or unreviewed Worker options. Observability storage, Logpush, preview URLs and workers.dev are disabled. Normal deployments never create a subscription or raise a quota.
+The default `billingMode: "free"` refuses paid or unverified account subscriptions. Set `billingMode: "paid"` explicitly to permit paid hosting, then manage your plan separately in the dashboard. Neither mode automatically upgrades subscriptions. See the [deployment instructions](../README.md#deploy-your-own-instance).
+
+Both modes allow one D1 binding plus static assets/configuration/secrets and refuse additional resources or unreviewed Worker options. Observability and preview URLs stay disabled. `workers.dev` or a custom domain can serve your instance. All commands below use your own configured origin, Worker name and database ID. Export `CLOUDFLARE_ACCOUNT_ID` before direct `cf` commands; npm deployment/migration scripts set it from the selected configuration.
 
 Cloudflare's current Free limits are 100,000 Worker requests/day and 10 ms CPU/request, D1 5 million rows read/day, 100,000 rows written/day, and 500 MB for this database. Static-asset requests do not invoke application code. Avatars, messages, indexes and all other D1 tables share the database limit. Limits apply across other usage in the same account where Cloudflare specifies account quotas.
 
@@ -17,13 +19,13 @@ The temporary diagnostic route, live trace, and diagnostic Worker versions were 
 ## Check service and storage
 
 ```sh
-npm run check:free
-curl --fail https://edating.soccera.uk/api/v1/status
-cf workers get estrogen-dating
-cf d1 get c947cb5b-b867-4d61-a8ee-37b8283ee37d
+npm run check:deployment
+curl --fail https://YOUR_HOSTNAME/api/v1/status
+cf workers get WORKER_NAME
+cf d1 get DATABASE_ID
 ```
 
-`cf` must be on PATH for commands shown directly; this machine's installation is `/home/lily/.npm-global/bin/cf`. Use the D1 dashboard for row usage and database size. Do not enable paid analytics to monitor this app.
+`cf` must be on PATH for commands shown directly. Use the D1 dashboard for row usage and database size. Do not enable paid analytics to monitor this app.
 
 When daily reads/writes are exhausted, wait for the daily reset. Do not repeatedly poll or deploy to fix quota errors. Clients retain drafts, reuse message `client_id` on retries, honor `Retry-After`, and keep backing off. If Workers itself is exhausted, static assets can remain available while API calls fail.
 
@@ -43,14 +45,12 @@ Run these with `cf d1 query DATABASE_ID --sql '…'`. They delete expired state 
 
 Migrations are additive by default. Keep code compatible with the prior schema until rollback is no longer needed. Do not change the configured D1 ID or recreate the database during a code deployment.
 
-On 2026-09-27 the database was deliberately replaced instead of migrated: the previous `ff090f36-9b39-49eb-9317-2d9629ec8cc9` held one testing account and was dropped, `c947cb5b-b867-4d61-a8ee-37b8283ee37d` was created with the same name, and `0001_initial.sql` was applied to it. `deployment.json` carries the new ID. A pre-replacement SQL export is at `/tmp/.private/lily/opencode/prod-backup-pre-18-removal.sql` if that account is ever needed.
-
 ## Code rollback
 
 Read available versions:
 
 ```sh
-cf workers versions list --worker-id estrogen-dating
+cf workers versions list --worker-id WORKER_NAME
 ```
 
 Create a JSON file containing the known-good version, for example:
@@ -62,27 +62,27 @@ Create a JSON file containing the known-good version, for example:
 Then switch traffic:
 
 ```sh
-cf workers deployments create --worker estrogen-dating --strategy percentage --versions @/tmp/edating-rollback.json
+cf workers deployments create --worker WORKER_NAME --strategy percentage --versions @/tmp/edating-rollback.json
 ```
 
-Rollback changes code and static assets, not D1 records. Avoid `--force`, especially when secret bindings changed. Recheck `/api/v1/status`, authentication, active conversations and the database ID after a rollback. The current production version is `7156fbd2-2a9d-449f-bd9b-68862d7d3c98`; `800d215e-30ae-4358-8486-339b839e4566` is the earliest version that matches the present schema. Anything older, including the original `cb9c61a0-f58f-4611-bc7b-bda01fb29e61`, expects the replaced schema and must not be rolled back to.
+Rollback changes code and static assets, not D1 records. Avoid `--force`, especially when secret bindings changed. Recheck `/api/v1/status`, authentication, active conversations and the database ID after a rollback.
 
 ## Database recovery
 
 D1 Free includes seven days of Time Travel. Capture a bookmark before a migration or other substantial data change:
 
 ```sh
-cf d1 time-travel get-bookmark c947cb5b-b867-4d61-a8ee-37b8283ee37d
+cf d1 time-travel get-bookmark DATABASE_ID
 ```
 
 To recover, first decide which newer writes may be lost and stop accepting new writes during the recovery window. Restore to the chosen bookmark with the confirmation prompt intact:
 
 ```sh
-cf d1 time-travel restore c947cb5b-b867-4d61-a8ee-37b8283ee37d --bookmark SAVED_BOOKMARK
+cf d1 time-travel restore DATABASE_ID --bookmark SAVED_BOOKMARK
 ```
 
 A database restore can bring back previously revoked credentials and closed matches. Review and reapply revocations/blocks made after the recovery point before reopening access. Check `d1_migrations`, align the deployed code with the restored schema, verify profile/avatar/message access, and then resume traffic. A code-only rollback is preferable when the data itself is sound.
 
 ## Secrets and hrtID configuration
 
-The current public PKCE client needs no client secret. If hrtID changes the client type, use a local file outside the repository with restrictive permissions containing `HRTID_CLIENT_SECRET`, then deploy with `cf deploy --prebuilt --secrets-file /path/to/private-secrets.json`. Remove the local file after configuration. Never add secrets to `deployment.json`, Vite environment variables, or agent examples. Re-run Free checks before deployment, and keep the production callback unchanged unless hrtID registration changes too.
+Public PKCE clients need no client secret. If your registered client requires one, use a local file outside the repository with restrictive permissions containing `HRTID_CLIENT_SECRET`, then deploy with `npm run deploy -- --secrets-file /path/to/private-secrets.json`. Remove the local file after configuration. Never add secrets to `deployment.json`, Vite environment variables, or agent examples. Use `npm run deploy -- --secrets-file /path/to/private-secrets.json` to retain configuration and billing checks. Keep your callback aligned with your hrtID registration.

@@ -1,6 +1,6 @@
 # Estrogen Dating
 
-Live at **https://edating.soccera.uk**. React + Vite + TypeScript frontend, Hono Worker, and one D1 database. No KV, R2, hosted models, paid bindings, or fictional production profiles.
+React + Vite + TypeScript frontend, Hono Worker, and one D1 database. No KV, R2, hosted models, paid bindings, or fictional production profiles.
 
 ## Product
 
@@ -12,7 +12,7 @@ Profiles support name, pronouns, bio, interests, a conversation prompt and an op
 
 ## Run and verify
 
-Requires Node 22+, npm, Python 3 (standard library only), and the authenticated `cf` CLI. This workspace also discovers the existing CLI at `~/.npm-global/bin/cf`; `CF_BIN` can override it.
+Requires Node 22+, npm, and Python 3 (standard library only). Remote operations also require the authenticated Cloudflare `cf` CLI (`npm install -g cf@1.0.0-beta.1`). `CF_BIN` can override its location.
 
 ```sh
 npm ci
@@ -23,7 +23,7 @@ npm run dev:api
 npm run dev
 ```
 
-The local API uses isolated D1 storage under `.cloudflare/local-d1`. Local hrtID sign-in is disabled because the registered callback is production-only. No login bypass ships in the app. The browser test provides isolated, ephemeral local accounts and sessions:
+The local API uses isolated D1 storage under `.cloudflare/local-d1`. Local hrtID sign-in is disabled; each deployed instance needs its own registered callback. No login bypass ships in the app. The browser test provides isolated, ephemeral local accounts and sessions:
 
 ```sh
 npx playwright install chromium
@@ -35,27 +35,47 @@ If using a browser downloaded to a custom directory, set `PLAYWRIGHT_BROWSERS_PA
 
 The test suite covers permissions, CSRF, token signature/issuer/audience/nonce/expiry, OAuth replay, profile onboarding, paused discovery, forbidden pairings, concurrent mutual likes, message idempotency and pagination, binary avatar replacement, blocking, unmatching, credential revocation, query indexes and quota failures. The browser suite covers onboarding through conversations, a lost send response and retry after reload, agent connection/revocation, avatar resizing, preferences, and automated WCAG A/AA accessibility checks across the main screens. Synthetic profiles exist only in these local tests.
 
-## Deploy
+## Deploy your own instance
 
-```sh
-npm run deploy
+1. Clone this repository and run `npm ci`. Install the Cloudflare CLI above and run `cf auth login`.
+2. Run `npm run configure` (or `python3 scripts/configure.py`) for interactive setup. The setup tool uses only the Python 3 standard library and can run before `npm ci`. It asks for your account, Worker, billing mode, D1 database, public address and hrtID client, then validates and saves `deployment.local.json` (ignored by Git). It derives your origin and routing settings and shows the hrtID callback to register. Press Enter to accept defaults; rerunning reuses existing values. Free hosting is the default. Ctrl+C cancels without saving. The script writes configuration only; use the steps below to obtain the required account/database/client details.
+
+   Alternatively, copy `deployment.json` to `deployment.local.json` and edit it manually. The committed file is a template; local settings take precedence. For multiple instances or CI, set `DEPLOYMENT_CONFIG=/absolute/path/to/instance.json` to select an entire configuration file. Files are not merged. The setup command also respects `DEPLOYMENT_CONFIG`, including when creating a new configuration file; it will not overwrite the shared `deployment.json` template.
+3. Get your account ID from the Cloudflare dashboard. Create an empty D1 database in that account:
+
+   ```sh
+   CLOUDFLARE_ACCOUNT_ID=YOUR_ACCOUNT_ID cf d1 create --name my-dating-db
+   ```
+
+4. In your configuration, set `accountId`, a unique `worker.name`, and `worker.env.DB.name` / `id` from the created database. Keep the binding names `DB` and `ASSETS` unchanged.
+5. Choose your public origin. For free `workers.dev` hosting, enable your account's workers.dev subdomain in the dashboard, leave `domains: []` and `workersDev: true`, and set `APP_ORIGIN.value` to `https://WORKER_NAME.ACCOUNT_SUBDOMAIN.workers.dev`. For a custom domain in your Cloudflare account, put its hostname in `domains`, set `workersDev: false`, and use its HTTPS origin. No trailing slash or path is allowed. Custom domain registration can have its own cost.
+6. Register your own hrtID public PKCE client with redirect URI `YOUR_ORIGIN/auth/callback` and launch URL `YOUR_ORIGIN/`. Set `HRTID_CLIENT_ID.value` to that client ID. The default issuer is `https://id.estrogen.delivery`. The flow uses `openid profile`, authorization code + S256 PKCE and signed RS256 ID tokens.
+7. Run:
+
+   ```sh
+   npm run check:deployment
+   npm run deploy
+   ```
+
+The deployment command checks configuration and billing policy, runs tests, builds, applies unapplied D1 migrations transactionally, then publishes with `cf deploy --prebuilt`. It targets the configured account explicitly, preserves the configured database, and does not create or upgrade subscriptions. The frontend is static; only `/api/*` and `/auth/*` invoke the Worker. Verify `YOUR_ORIGIN/api/v1/status` and complete a sign-in after deployment.
+
+The template intentionally fails remote checks until its placeholders are replaced. Builds and local tests work without Cloudflare credentials. Keep instance configuration out of commits; do not store secrets in it. If your hrtID client requires a secret, use a private JSON file containing `HRTID_CLIENT_SECRET` and run `npm run deploy -- --secrets-file /path/to/private-secrets.json`.
+
+## Free by default; optional paid hosting
+
+`billingMode` defaults to `"free"` when omitted. In this mode, remote deployment and migration refuse active paid or unverified account subscriptions. Free capacity exhaustion is allowed to interrupt service; scripts never upgrade the account automatically.
+
+To permit paid Cloudflare hosting, explicitly set this top-level field in your instance configuration:
+
+```json
+"billingMode": "paid"
 ```
 
-This checks the Free account and permitted bindings, tests, builds locally, applies unapplied D1 migrations transactionally, then deploys using `cf`. The static frontend is served directly; only `/api/*` and `/auth/*` invoke the Worker. Deployment retains the existing D1 database and data.
+This allows deployment to a paid account. Select the desired Workers plan separately in the Cloudflare dashboard; changing this field alone does not purchase a plan. Paid mode retains the same D1 + static assets architecture and resource restrictions. Usage can incur charges under [Cloudflare Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) and [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/); this switch is not a spending cap. It does not charge app users or add payment processing.
 
-Configuration is in `deployment.json`. The production resources are Worker `estrogen-dating` and D1 `estrogen-dating-db` (`ff090f36-9b39-49eb-9317-2d9629ec8cc9`). Never upgrade the Workers account to meet demand. Service interruption is preferable to additional charges.
+`npm run check:deployment` follows the selected mode; `npm run check:free` always requires free mode. `npm run migrate` uses the same configuration and policy as deployment. If `CLOUDFLARE_ACCOUNT_ID` is already set, it must match the configuration.
 
-See [operations and recovery](docs/OPERATIONS.md), [design references](docs/DESIGN.md), and the published [agent guide](https://edating.soccera.uk/guide.html), [OpenAPI specification](https://edating.soccera.uk/openapi.json), and [TypeScript example](examples/agent.ts).
-
-## hrtID
-
-- Issuer: `https://id.estrogen.delivery`
-- Client ID: `1nlkpqNdrH4z1BlfGse9sA`
-- Redirect: `https://edating.soccera.uk/auth/callback`
-- Launch: `https://edating.soccera.uk/`
-- Flow: authorization code with S256 PKCE, `openid profile`, signed RS256 ID tokens, issuer/audience/expiry/nonce validation, one-time state bound to a secure browser cookie.
-
-This registered client works as a public PKCE client; no client secret is necessary. The owner confirmed the live flow reaches profile setup. If the provider later requires confidential-client authentication, `HRTID_CLIENT_SECRET` is supported as a Worker secret. Never commit it or paste it into frontend code.
+See [operations and recovery](docs/OPERATIONS.md), [design references](docs/DESIGN.md), the deployed `/guide.html` and `/openapi.json`, and the [TypeScript agent example](examples/agent.ts). Set `ED_ORIGIN` and `ED_TOKEN` when running an agent; credentials belong to that instance only.
 
 Sessions last seven days and use Secure, HttpOnly, SameSite=Lax, `__Host-` cookies; D1 stores only the session hash. Browser mutations require the exact application Origin and a session-bound CSRF token. Agent tokens are random and stored only as hashes. There are no embedded identity-provider tokens or API credentials in the client bundle.
 
