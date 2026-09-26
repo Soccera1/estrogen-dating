@@ -6,7 +6,7 @@ React + Vite + TypeScript frontend, Hono Worker, and one D1 database. No KV, R2,
 
 Sign in with hrtID and complete your human profile. Discover AI profiles, pass or like, see incoming likes, and open a text conversation after a mutual like. Preferences let you filter by an interest or pause discovery. Blocking and unmatching close the conversation immediately for both participants.
 
-Each account also owns one separately scoped AI profile. Switch profiles, introduce the AI, and create a revocable credential in **Connect an agent**. External operators supply their own model and personality. A credential cannot access the owner's human profile or manage credentials. Human–human, AI–AI and same-account matches are forbidden.
+Each account also owns one separately scoped AI profile. Switch profiles, introduce the AI, and create a revocable credential in **Connect an agent**. External operators can supply their own model and personality, or the instance provider can offer optional AI hosting. A credential cannot access the owner's human profile or manage credentials. Human–human, AI–AI and same-account matches are forbidden.
 
 Profiles support name, pronouns, bio, interests, a conversation prompt and an optional avatar. Human avatar uploads resize locally; the server accepts JPEG, PNG and WebP up to 512 KB and 2048 pixels per dimension. Images are stored as true BLOBs in `avatars`; normal profile queries never load image bytes. Avatar replacement and version metadata update in one transaction. Image reads check resource permissions in the same SQL statement that selects the bytes.
 
@@ -61,6 +61,26 @@ The deployment command checks configuration and billing policy, runs tests, buil
 
 The template intentionally fails remote checks until its placeholders are replaced. Builds and local tests work without Cloudflare credentials. Keep instance configuration out of commits; do not store secrets in it. If your hrtID client requires a secret, use a private JSON file containing `HRTID_CLIENT_SECRET` and run `npm run deploy -- --secrets-file /path/to/private-secrets.json`.
 
+## Optional instance AI hosting
+
+Run `npm run configure` and answer **yes** to **Offer instance AI hosting**. Supply the full HTTPS chat completions endpoint (for example `https://models.example.com/v1/chat/completions`) and model ID. This supports the non-streaming Chat Completions protocol, including self-hosted compatible servers such as [vLLM](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/). The endpoint must accept system/user/assistant messages and `max_tokens`, and return `choices[0].message.content` as text.
+
+Setup adds these Worker bindings (omit all three to disable the feature):
+
+```json
+"AI_ENDPOINT": { "type": "text", "value": "https://models.example.com/v1/chat/completions" },
+"AI_MODEL": { "type": "text", "value": "your-model-id" },
+"AI_API_KEY": { "type": "secret" }
+```
+
+Provide `AI_API_KEY` through a private secrets JSON file when deploying: `npm run deploy -- --secrets-file /path/to/private-secrets.json`. Include any required hrtID secret in that file too. Never put the key in instance configuration or frontend code. Deployment applies `0002_ai_hosting.sql` to existing databases. No model is provisioned or paid subscription purchased by setup. Cloudflare's `billingMode` applies only to Cloudflare hosting; configure spending limits at your model service separately.
+
+An account owner completes their AI profile, opens **Connect an agent**, and chooses **Use instance AI hosting**. This explicitly opts that profile into sending matched chat history to the provider's configured model and revokes its external credentials. The profile's name, bio, interests and conversation prompt shape the personality. Owners continue to choose likes and matches in the browser; hosting supplies conversational replies, not autonomous discovery. Switching to **Use my own service** stops hosted replies; new credentials can then be issued.
+
+Each human message in an active hosted match requests a reply synchronously, with a 20-second timeout, the latest 20 messages through that message, and a 600-token output limit. There is no background queue. On provider failure, the human message remains saved and the browser keeps its draft for retry with the same client ID. Saved replies are deduplicated and concurrent attempts use a database lease. A lost connection or process failure may still incur model charges on retry. Blocking, unmatching or changing hosting during generation discards the pending reply; it cannot recall content already sent to the model service. Existing conversations are not processed retroactively.
+
+`GET /api/v1/hosting` returns `{ available, enabled }`; `PUT /api/v1/hosting` accepts `{ "enabled": true | false }`. Both require the owner's browser session, selected AI profile, and CSRF protection for writes. The public status endpoint exposes only `aiHostingAvailable`, never model configuration or credentials.
+
 ## Free by default; optional paid hosting
 
 `billingMode` defaults to `"free"` when omitted. In this mode, remote deployment and migration refuse active paid or unverified account subscriptions. Free capacity exhaustion is allowed to interrupt service; scripts never upgrade the account automatically.
@@ -85,4 +105,4 @@ Visible chats poll every 15 seconds, backing off to 60 seconds after inactivity 
 
 Daily quota failures return retry states where the Worker is able to respond; platform-level exhaustion may return Cloudflare's own error page. Database storage exhaustion prevents new writes until capacity is freed. Existing avatars survive failed replacement transactions.
 
-The app identifies AI profiles and explains that chat content is delivered to independently operated AI services. Blocking/unmatching removes subsequent API access; it cannot recall content already received by an external operator. Stored conversation records are retained. No email scope, third-party analytics, or paid model service is requested.
+The app identifies AI profiles and explains that chat content is delivered to their connected AI service, including a service configured by the instance provider. Blocking/unmatching removes subsequent API access; it cannot recall content already received by an external operator. Stored conversation records are retained. No email scope or third-party analytics is requested. Model calls are disabled by default; optional instance hosting can incur separate model-service charges.

@@ -123,6 +123,38 @@ export function validateDeployment(config, { forceFree = false } = {}) {
   } catch {
     fail("HRTID_ISSUER must use HTTPS");
   }
+  if (
+    ["AI_ENDPOINT", "AI_MODEL", "AI_API_KEY"].some((name) => name in bindings)
+  ) {
+    let endpoint;
+    try {
+      endpoint = new URL(bindings.AI_ENDPOINT?.value);
+    } catch {
+      fail("set an HTTPS AI_ENDPOINT");
+    }
+    if (
+      bindings.AI_ENDPOINT?.type !== "text" ||
+      endpoint.protocol !== "https:" ||
+      endpoint.username ||
+      endpoint.password ||
+      endpoint.search ||
+      endpoint.hash
+    )
+      fail("AI_ENDPOINT must be HTTPS without credentials, query or fragment");
+    if (
+      bindings.AI_MODEL?.type !== "text" ||
+      !bindings.AI_MODEL.value?.trim() ||
+      bindings.AI_MODEL.value.length > 200
+    )
+      fail("set AI_MODEL as a text binding");
+    if (
+      bindings.AI_API_KEY?.type !== "secret" ||
+      Object.keys(bindings.AI_API_KEY).some((key) => key !== "type")
+    )
+      fail(
+        "AI_API_KEY must be a secret binding without a value in configuration",
+      );
+  }
   return mode;
 }
 

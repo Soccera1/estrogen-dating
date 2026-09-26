@@ -101,6 +101,18 @@ def configure_deployment(config, ask=input, log=print):
     log(f"Register your hrtID client with:\n  Redirect URI: https://{host}/auth/callback\n  Launch URL: https://{host}/")
     bindings["HRTID_ISSUER"]["value"] = field("hrtID issuer URL", bindings["HRTID_ISSUER"].get("value"), issuer_url, "Enter a valid HTTPS issuer URL.")
     bindings["HRTID_CLIENT_ID"]["value"] = field("hrtID public client ID", bindings["HRTID_CLIENT_ID"].get("value"), lambda v: configured(v) and not re.search(r"\s", v), "Enter your registered client ID, not a client secret.")
+    log("Optional instance AI hosting sends matched chats to your model service. Model costs are separate from Cloudflare billing mode.")
+    ai_mode = field("Offer instance AI hosting (yes/no)", "yes" if bindings.get("AI_ENDPOINT") else "no", lambda v: v in {"yes", "no"}, "Enter yes or no.")
+    if ai_mode == "yes":
+        endpoint = field("HTTPS chat completions endpoint (full URL)", bindings.get("AI_ENDPOINT", {}).get("value"), issuer_url, "Enter an HTTPS chat completions URL without credentials, query or fragment.")
+        model = field("Hosted model ID", bindings.get("AI_MODEL", {}).get("value"), lambda v: configured(v) and len(v) <= 200, "Enter your model ID.")
+        bindings["AI_ENDPOINT"] = {"type": "text", "value": endpoint}
+        bindings["AI_MODEL"] = {"type": "text", "value": model}
+        bindings["AI_API_KEY"] = {"type": "secret"}
+        log("Set the Worker secret AI_API_KEY before enabling hosting for a profile. Never put the key in this configuration or frontend code.")
+    else:
+        for name in ("AI_ENDPOINT", "AI_MODEL", "AI_API_KEY"):
+            bindings.pop(name, None)
     return result
 
 

@@ -1,5 +1,8 @@
 export interface Env {
   DB: D1Database;
+  AI_ENDPOINT?: string;
+  AI_MODEL?: string;
+  AI_API_KEY?: string;
   ASSETS: Fetcher;
   APP_ORIGIN: string;
   HRTID_ISSUER: string;

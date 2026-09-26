@@ -24,6 +24,28 @@ describe("portable deployment policy", () => {
     expect(validateDeployment(c)).toBe("free");
     expect(deploymentEnv(c).CLOUDFLARE_ACCOUNT_ID).toBe(c.accountId);
   });
+  it("requires complete hosting configuration and keeps the model key out of config", () => {
+    const c = config();
+    c.worker.env.AI_ENDPOINT = {
+      type: "text",
+      value: "https://model.example/v1/chat/completions",
+    };
+    expect(() => validateDeployment(c)).toThrow();
+    c.worker.env.AI_MODEL = { type: "text", value: "model" };
+    c.worker.env.AI_API_KEY = { type: "secret" };
+    expect(validateDeployment(c)).toBe("free");
+    c.worker.env.AI_API_KEY.value = "do-not-store";
+    expect(() => validateDeployment(c)).toThrow("secret binding");
+    delete c.worker.env.AI_API_KEY.value;
+    for (const value of [
+      "http://model.example",
+      "https://key@model.example",
+      "https://model.example?key=secret",
+    ]) {
+      c.worker.env.AI_ENDPOINT.value = value;
+      expect(() => validateDeployment(c)).toThrow("AI_ENDPOINT");
+    }
+  });
   it("supports custom domains", () => {
     const c = config();
     c.worker.domains = ["dating.example.com"];

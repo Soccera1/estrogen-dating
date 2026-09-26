@@ -14,6 +14,8 @@ import {
 } from "./security";
 import { validateAvatar, toHex, fromHex } from "./avatar";
 
+import { hostingAvailable, hostedReply } from "./hosting";
+
 const app = new Hono<App>();
 const publicProfile = (p: Profile) => ({
   id: p.id,
@@ -45,6 +47,7 @@ app.get("/api/v1/status", (c) =>
   c.json({
     name: "Estrogen Dating",
     version: "1",
+    aiHostingAvailable: hostingAvailable(c.env),
     loginReady: Boolean(
       c.env.HRTID_CLIENT_ID && c.env.HRTID_CLIENT_ID !== "PLACEHOLDER",
     ),
@@ -102,8 +105,51 @@ app.use("/api/v1/*", async (c, next) => {
     .bind(id, principal.account)
     .first<Profile>();
   if (!profile) fail(403, "Profile access denied.");
+  if (
+    principal.profile &&
+    (await c.env.DB.prepare(
+      "SELECT 1 FROM ai_hosting WHERE profile_id=? AND enabled=1",
+    )
+      .bind(id)
+      .first())
+  )
+    fail(403, "This profile uses instance AI hosting.");
   c.set("profile", profile);
   await next();
+});
+app.get("/api/v1/hosting", async (c) => {
+  if (c.get("principal").profile || c.get("profile").kind !== "ai")
+    fail(403, "Only the account owner can manage AI hosting.");
+  const settings = await c.env.DB.prepare(
+    "SELECT enabled FROM ai_hosting WHERE profile_id=?",
+  )
+    .bind(c.get("profile").id)
+    .first<{ enabled: number }>();
+  return c.json({
+    available: hostingAvailable(c.env),
+    enabled: Boolean(settings?.enabled),
+  });
+});
+app.put("/api/v1/hosting", async (c) => {
+  const me = c.get("profile");
+  if (c.get("principal").profile || me.kind !== "ai")
+    fail(403, "Only the account owner can manage AI hosting.");
+  const body = await jsonBody(c);
+  if (typeof body.enabled !== "boolean")
+    fail(400, "Enabled must be true or false.");
+  if (body.enabled && !hostingAvailable(c.env))
+    fail(503, "Instance AI hosting is not configured.");
+  if (body.enabled && !me.onboarded) fail(400, "Set up your AI profile first.");
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO ai_hosting(profile_id,enabled) VALUES(?,?)
+      ON CONFLICT(profile_id) DO UPDATE SET enabled=excluded.enabled,version=ai_hosting.version+1`,
+    ).bind(me.id, Number(body.enabled)),
+    c.env.DB.prepare(
+      "UPDATE credentials SET revoked_at=unixepoch() WHERE profile_id=? AND revoked_at IS NULL AND ?=1",
+    ).bind(me.id, Number(body.enabled)),
+  ]);
+  return c.json({ available: hostingAvailable(c.env), enabled: body.enabled });
 });
 app.patch("/api/v1/profile", async (c) => {
   const p = c.get("profile"),
@@ -354,9 +400,14 @@ app.post("/api/v1/matches/:id/messages", async (c) => {
       "SELECT id,match_id,sender,body,created_at,client_id FROM messages WHERE sender=? AND client_id=?",
     ).bind(me.id, clientId),
   ]);
-  const message = results[1].results[0] as { match_id: string; body: string };
+  const message = results[1].results[0] as {
+    id: number;
+    match_id: string;
+    body: string;
+  };
   if (message.match_id !== match || message.body !== text)
     fail(409, "Client ID already used for a different message.");
+  if (me.kind === "human") await hostedReply(c.env, match, message.id);
   return c.json(message);
 });
 app.get("/api/v1/events", async (c) => {
@@ -393,6 +444,14 @@ app.post("/api/v1/credentials", async (c) => {
   const me = c.get("profile");
   if (c.get("principal").profile || me.kind !== "ai")
     fail(403, "Only the account owner can connect an AI profile.");
+  if (
+    await c.env.DB.prepare(
+      "SELECT 1 FROM ai_hosting WHERE profile_id=? AND enabled=1",
+    )
+      .bind(me.id)
+      .first()
+  )
+    fail(409, "Switch to external hosting before creating a credential.");
   if (!me.onboarded) fail(400, "Set up your AI profile first.");
   const body = await jsonBody(c),
     name = string(body.name, "Credential name", 60, 1);

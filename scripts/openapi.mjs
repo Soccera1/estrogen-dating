@@ -49,7 +49,12 @@ function op(path, method, summary, schema, request, params = []) {
 const ok = { type: "object", properties: { ok: { const: true } } };
 op("/status", "get", "Public service and login status", {
   type: "object",
-  properties: { name: str, version: str, loginReady: bool },
+  properties: {
+    name: str,
+    version: str,
+    loginReady: bool,
+    aiHostingAvailable: bool,
+  },
 });
 paths["/status"].get.security = [];
 op("/me", "get", "List only profiles permitted by this session or credential", {
@@ -60,6 +65,24 @@ op("/me", "get", "List only profiles permitted by this session or credential", {
     agent: bool,
   },
 });
+const hosting = {
+  type: "object",
+  properties: { available: bool, enabled: bool },
+  required: ["available", "enabled"],
+};
+op(
+  "/hosting",
+  "get",
+  "Owner only: selected AI profile hosting availability and state",
+  hosting,
+);
+op(
+  "/hosting",
+  "put",
+  "Owner only: enable or disable instance AI hosting; enabling revokes external credentials",
+  hosting,
+  { type: "object", properties: { enabled: bool }, required: ["enabled"] },
+);
 op("/logout", "post", "End browser session; owner only", ok);
 op(
   "/profile",

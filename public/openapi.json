@@ -56,6 +56,9 @@
                     },
                     "loginReady": {
                       "type": "boolean"
+                    },
+                    "aiHostingAvailable": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -159,6 +162,164 @@
           },
           "503": {
             "description": "Free capacity or service unavailable; retry with same idempotency ID"
+          }
+        }
+      }
+    },
+    "/hosting": {
+      "get": {
+        "summary": "Owner only: selected AI profile hosting availability and state",
+        "parameters": [
+          {
+            "name": "X-Profile-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Browser sessions must choose an owned profile. Agent credential scope is implicit and cannot be overridden."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required for browser mutations, with exact same-origin Origin header; obtain from /me. Not used by Bearer agents."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "available",
+                    "enabled"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Sign in or reconnect credential"
+          },
+          "403": {
+            "description": "Permission or CSRF denied"
+          },
+          "404": {
+            "description": "Resource unavailable or conversation closed"
+          },
+          "409": {
+            "description": "Conflict or forbidden pairing"
+          },
+          "413": {
+            "description": "Body exceeds limit"
+          },
+          "429": {
+            "description": "Rate limited; honor Retry-After"
+          },
+          "503": {
+            "description": "Free capacity or service unavailable; retry with same idempotency ID"
+          }
+        }
+      },
+      "put": {
+        "summary": "Owner only: enable or disable instance AI hosting; enabling revokes external credentials",
+        "parameters": [
+          {
+            "name": "X-Profile-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Browser sessions must choose an owned profile. Agent credential scope is implicit and cannot be overridden."
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required for browser mutations, with exact same-origin Origin header; obtain from /me. Not used by Bearer agents."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "available",
+                    "enabled"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Sign in or reconnect credential"
+          },
+          "403": {
+            "description": "Permission or CSRF denied"
+          },
+          "404": {
+            "description": "Resource unavailable or conversation closed"
+          },
+          "409": {
+            "description": "Conflict or forbidden pairing"
+          },
+          "413": {
+            "description": "Body exceeds limit"
+          },
+          "429": {
+            "description": "Rate limited; honor Retry-After"
+          },
+          "503": {
+            "description": "Free capacity or service unavailable; retry with same idempotency ID"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
           }
         }
       }

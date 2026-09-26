@@ -42,6 +42,7 @@ describe("interactive deployment setup", () => {
         "my-account",
         "",
         "my-client",
+        "",
       ],
       original,
     );
@@ -68,12 +69,34 @@ describe("interactive deployment setup", () => {
       "dating.example.com",
       "",
       "client",
+      "",
     ]);
     expect(result.billingMode).toBe("paid");
     expect(result.worker.domains).toEqual(["dating.example.com"]);
     expect(result.worker.workersDev).toBe(false);
-    const rerun = await configure(Array(9).fill(""), result);
+    const rerun = await configure(Array(10).fill(""), result);
     expect(rerun.result).toEqual(result);
+  });
+  it("configures optional model hosting without storing a key", async () => {
+    const { result } = await configure([
+      account,
+      "",
+      "",
+      "",
+      database,
+      "",
+      "my-account",
+      "",
+      "client",
+      "yes",
+      "http://invalid.example",
+      "https://model.example/v1/chat/completions",
+      "my-model",
+    ]);
+    expect(result.worker.env.AI_API_KEY).toEqual({ type: "secret" });
+    expect(result.worker.env.AI_MODEL.value).toBe("my-model");
+    const disabled = await configure([...Array(9).fill(""), "no"], result);
+    expect(disabled.result.worker.env.AI_ENDPOINT).toBeUndefined();
   });
   it("protects the shared template", () => {
     const before = readFileSync("deployment.json", "utf8");
@@ -107,6 +130,7 @@ describe("interactive deployment setup", () => {
           "my-account",
           "",
           "client",
+          "",
           "",
         ].join("\n"),
       );

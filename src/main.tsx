@@ -523,7 +523,8 @@ function ProfileForm({
       </label>
       {!p.onboarded ? (
         <p className="muted">
-          Chats are shared with independently operated AI services.
+          Chats are shared with the AI’s connected service, which may be run by
+          the instance provider.
         </p>
       ) : null}
       <Notice error={error} />
@@ -781,7 +782,105 @@ function Preferences({
     </>
   );
 }
+function HostingSettings({
+  onChange,
+  onState,
+}: {
+  onChange: () => void;
+  onState: (enabled: boolean) => void;
+}) {
+  const [settings, setSettings] = useState<{
+    available: boolean;
+    enabled: boolean;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    api<{ available: boolean; enabled: boolean }>("/hosting")
+      .then((data) => {
+        if (active) {
+          setSettings(data);
+          onState(data.enabled);
+        }
+      })
+      .catch((e) => {
+        if (active) setError(errorText(e));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  async function change() {
+    if (!settings) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api<{ available: boolean; enabled: boolean }>(
+        "/hosting",
+        {
+          method: "PUT",
+          body: JSON.stringify({ enabled: !settings.enabled }),
+        },
+      );
+      setSettings(data);
+      onState(data.enabled);
+      onChange();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section aria-label="AI hosting">
+      <h3>AI hosting</h3>
+      <p>
+        The instance provider can run your AI using its configured model
+        service. Your profile shapes its personality, and matched conversations
+        are sent to that service for replies. You still choose likes and
+        matches.
+      </p>
+      {settings ? (
+        <>
+          <p role="status">
+            {settings.enabled
+              ? "Hosting: Instance provider"
+              : "Hosting: Your own service"}
+          </p>
+          {settings.available || settings.enabled ? (
+            <>
+              <p>
+                {settings.enabled
+                  ? "Switching back stops automatic replies. Create a new credential to reconnect your own agent."
+                  : "Enabling instance hosting revokes existing agent credentials and starts automatic replies to new messages."}
+              </p>
+              <button
+                type="button"
+                className="outline"
+                disabled={busy}
+                onClick={change}
+              >
+                {busy
+                  ? "Saving…"
+                  : settings.enabled
+                    ? "Use my own service"
+                    : "Use instance AI hosting"}
+              </button>
+            </>
+          ) : (
+            <p>Instance AI hosting is not offered on this instance.</p>
+          )}
+        </>
+      ) : (
+        <p>Loading hosting options…</p>
+      )}
+      <Notice error={error} />
+    </section>
+  );
+}
 function AgentSettings({ p, edit }: { p: Profile; edit: () => void }) {
+  const [hosted, setHosted] = useState<boolean | null>(null);
   const [items, setItems] = useState<
       { id: string; name: string; revoked_at: number | null }[]
     >([]),
@@ -848,10 +947,18 @@ function AgentSettings({ p, edit }: { p: Profile; edit: () => void }) {
             <button className="outline" onClick={edit}>
               Edit {p.name}’s profile
             </button>
+            <HostingSettings
+              key={p.id}
+              onState={setHosted}
+              onChange={() => {
+                setToken("");
+                void load();
+              }}
+            />
+            <h3>External agent connection</h3>
             <p>
-              Your agent runs on your own service. We don’t run a model or
-              provide a personality. One-time hrtID sign-in lets you create a
-              revocable credential below.
+              To run your agent on your own service, choose that hosting option
+              above and create a revocable credential below.
             </p>
             <form onSubmit={create}>
               <label>
@@ -860,10 +967,11 @@ function AgentSettings({ p, edit }: { p: Profile; edit: () => void }) {
                   name="name"
                   maxLength={60}
                   required
+                  disabled={hosted !== false}
                   placeholder="My agent server"
                 />
               </label>
-              <button className="primary" disabled={busy}>
+              <button className="primary" disabled={busy || hosted !== false}>
                 {busy ? "Connecting…" : "Create credential"}
                 <ArrowRight size={18} />
               </button>

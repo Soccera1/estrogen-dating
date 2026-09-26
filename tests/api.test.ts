@@ -4,7 +4,7 @@ import {
   Response as MFResponse,
   convertV4MiniflareOptions,
 } from "miniflare";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { build } from "esbuild";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import { sha256 } from "../worker/security";
@@ -12,6 +12,9 @@ import { sha256 } from "../worker/security";
 let mf: Miniflare, db: D1Database;
 const origin = "https://edating.soccera.uk";
 let tokenReply = "";
+let modelCalls: { messages: { role: string; content: string }[] }[] = [];
+let modelFailure = false;
+let modelHook: (() => Promise<void>) | undefined;
 let expectedVerifier = "";
 const oidc = "https://id.estrogen.delivery";
 let privateKey: CryptoKey;
@@ -30,9 +33,7 @@ async function actor(): Promise<Actor> {
     csrf = crypto.randomUUID();
   await db.batch([
     db
-      .prepare(
-        "INSERT INTO accounts(id,subject) VALUES(?,?)",
-      )
+      .prepare("INSERT INTO accounts(id,subject) VALUES(?,?)")
       .bind(account, account),
     db
       .prepare(
@@ -108,6 +109,22 @@ beforeAll(async () => {
       compatibilityDate: "2026-09-25",
       d1Databases: ["DB"],
       outboundService: async (request) => {
+        if (request.url === "https://model.example/v1/chat/completions") {
+          expect(request.headers.get("Authorization")).toBe(
+            "Bearer test-model-key",
+          );
+          modelCalls.push(
+            (await request.json()) as (typeof modelCalls)[number],
+          );
+          if (modelHook) await modelHook();
+          if (modelFailure)
+            return new MFResponse("private provider failure", { status: 500 });
+          return MFResponse.json({
+            choices: [
+              { message: { content: "Hello from the instance model." } },
+            ],
+          });
+        }
         if (request.url === oidc + "/.well-known/openid-configuration")
           return MFResponse.json({
             issuer: oidc,
@@ -126,6 +143,9 @@ beforeAll(async () => {
         return new MFResponse("Unexpected provider request", { status: 400 });
       },
       bindings: {
+        AI_ENDPOINT: "https://model.example/v1/chat/completions",
+        AI_MODEL: "test-model",
+        AI_API_KEY: "test-model-key",
         APP_ORIGIN: origin,
         HRTID_ISSUER: oidc,
         HRTID_CLIENT_ID: "test-client",
@@ -133,13 +153,211 @@ beforeAll(async () => {
     }),
   );
   db = (await mf.getD1Database("DB")) as unknown as D1Database;
-  const sql = await readFile("migrations/0001_initial.sql", "utf8");
-  await db.exec(sql.replace(/--[^\n]*/g, "").replaceAll("\n", " "));
+  for (const file of (await readdir("migrations"))
+    .filter((f) => f.endsWith(".sql"))
+    .sort()) {
+    const sql = await readFile(`migrations/${file}`, "utf8");
+    await db.exec(sql.replace(/--[^\n]*/g, "").replaceAll("\n", " "));
+  }
 }, 30000);
 afterAll(async () => {
   await mf?.dispose();
 });
 describe("D1-only API", () => {
+  it("offers owner-only hosted AI, revokes agents, replies once and safely retries provider failures", async () => {
+    const a = await actor(),
+      b = await actor();
+    expect(
+      (await request(a, "/api/v1/hosting", "PUT", { enabled: true })).status,
+    ).toBe(403);
+    const credential = (await (
+      await request(
+        b,
+        "/api/v1/credentials",
+        "POST",
+        { name: "old agent" },
+        b.ai,
+      )
+    ).json()) as { token: string };
+    expect(
+      (
+        await request(
+          null,
+          "/api/v1/hosting",
+          "PUT",
+          { enabled: true },
+          undefined,
+          { Authorization: `Bearer ${credential.token}` },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await request(b, "/api/v1/hosting", "PUT", { enabled: "yes" }, b.ai))
+        .status,
+    ).toBe(400);
+    expect(
+      (await request(b, "/api/v1/hosting", "PUT", { enabled: true }, b.ai))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await request(null, "/api/v1/me", "GET", undefined, undefined, {
+          Authorization: `Bearer ${credential.token}`,
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await request(
+          b,
+          "/api/v1/credentials",
+          "POST",
+          { name: "competing" },
+          b.ai,
+        )
+      ).status,
+    ).toBe(409);
+    const match = await pair(a, b);
+    const body = { body: "Hello hosted AI", client_id: crypto.randomUUID() };
+    modelCalls = [];
+    expect(
+      (await request(a, `/api/v1/matches/${match}/messages`, "POST", body))
+        .status,
+    ).toBe(200);
+    expect(
+      (await request(a, `/api/v1/matches/${match}/messages`, "POST", body))
+        .status,
+    ).toBe(200);
+    expect(modelCalls).toHaveLength(1);
+    expect(modelCalls[0].messages.at(-1)).toEqual({
+      role: "user",
+      content: body.body,
+    });
+    expect(
+      (
+        await db
+          .prepare("SELECT body FROM messages WHERE match_id=? AND sender=?")
+          .bind(match, b.ai)
+          .all()
+      ).results,
+    ).toEqual([{ body: "Hello from the instance model." }]);
+    const retry = { body: "Second message", client_id: crypto.randomUUID() };
+    modelFailure = true;
+    const failed = await request(
+      a,
+      `/api/v1/matches/${match}/messages`,
+      "POST",
+      retry,
+    );
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).not.toContain("private provider failure");
+    modelFailure = false;
+    expect(
+      (await request(a, `/api/v1/matches/${match}/messages`, "POST", retry))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await db
+          .prepare("SELECT COUNT(*) AS n FROM messages WHERE match_id=?")
+          .bind(match)
+          .first<{ n: number }>()
+      )?.n,
+    ).toBe(4);
+    await request(b, "/api/v1/hosting", "PUT", { enabled: false }, b.ai);
+    const before = modelCalls.length;
+    await request(a, `/api/v1/matches/${match}/messages`, "POST", {
+      body: "External now",
+      client_id: crypto.randomUUID(),
+    });
+    expect(modelCalls).toHaveLength(before);
+    expect(
+      (
+        await request(
+          b,
+          "/api/v1/credentials",
+          "POST",
+          { name: "new agent" },
+          b.ai,
+        )
+      ).status,
+    ).toBe(201);
+  });
+  it("leases concurrent retries so only one provider call runs", async () => {
+    const a = await actor(),
+      b = await actor();
+    await request(b, "/api/v1/hosting", "PUT", { enabled: true }, b.ai);
+    const match = await pair(a, b);
+    const body = { body: "Concurrent message", client_id: crypto.randomUUID() };
+    let release!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    modelCalls = [];
+    modelHook = async () => {
+      entered();
+      await gate;
+    };
+    const first = request(a, `/api/v1/matches/${match}/messages`, "POST", body);
+    try {
+      await ready;
+      expect(
+        (await request(a, `/api/v1/matches/${match}/messages`, "POST", body))
+          .status,
+      ).toBe(503);
+    } finally {
+      release();
+      modelHook = undefined;
+    }
+    expect((await first).status).toBe(200);
+    expect(
+      (await request(a, `/api/v1/matches/${match}/messages`, "POST", body))
+        .status,
+    ).toBe(200);
+    expect(modelCalls).toHaveLength(1);
+  });
+  it.each(["block", "unmatch", "disable"])(
+    "discards a hosted reply after %s during inference",
+    async (action) => {
+      const a = await actor(),
+        b = await actor();
+      await request(b, "/api/v1/hosting", "PUT", { enabled: true }, b.ai);
+      const match = await pair(a, b);
+      modelHook = async () => {
+        if (action === "disable")
+          await request(b, "/api/v1/hosting", "PUT", { enabled: false }, b.ai);
+        else if (action === "block")
+          await request(a, `/api/v1/blocks/${b.ai}`, "PUT");
+        else await request(a, `/api/v1/matches/${match}`, "DELETE");
+      };
+      try {
+        expect(
+          (
+            await request(a, `/api/v1/matches/${match}/messages`, "POST", {
+              body: "Race",
+              client_id: crypto.randomUUID(),
+            })
+          ).status,
+        ).toBe(200);
+        expect(
+          (
+            await db
+              .prepare(
+                "SELECT COUNT(*) AS n FROM messages WHERE match_id=? AND sender=?",
+              )
+              .bind(match, b.ai)
+              .first<{ n: number }>()
+          )?.n,
+        ).toBe(0);
+      } finally {
+        modelHook = undefined;
+      }
+    },
+  );
   it("requires authentication and CSRF, prevents shared-account/agent scope confusion", async () => {
     const a = await actor(),
       b = await actor();

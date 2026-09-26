@@ -3,7 +3,7 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import AxeBuilder from "@axe-core/playwright";
 import { chromium } from "@playwright/test";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { resolve, extname } from "node:path";
 import assert from "node:assert/strict";
@@ -16,6 +16,9 @@ const mf = new Miniflare(
     compatibilityDate: "2026-09-25",
     d1Databases: ["DB"],
     bindings: {
+      AI_ENDPOINT: "https://model.example/v1/chat/completions",
+      AI_MODEL: "test-model",
+      AI_API_KEY: "test-key",
       APP_ORIGIN: origin,
       HRTID_ISSUER: "https://id.estrogen.delivery",
       HRTID_CLIENT_ID: "test",
@@ -23,11 +26,15 @@ const mf = new Miniflare(
   }),
 );
 const db = await mf.getD1Database("DB");
-await db.exec(
-  (await readFile("migrations/0001_initial.sql", "utf8"))
-    .replace(/--[^\n]*/g, "")
-    .replaceAll("\n", " "),
-);
+for (const file of (await readdir("migrations"))
+  .filter((f) => f.endsWith(".sql"))
+  .sort()) {
+  await db.exec(
+    (await readFile(`migrations/${file}`, "utf8"))
+      .replace(/--[^\n]*/g, "")
+      .replaceAll("\n", " "),
+  );
+}
 const account = randomUUID(),
   human = randomUUID(),
   ai = randomUUID(),
@@ -351,6 +358,44 @@ try {
     ).status,
     401,
   );
+  await page
+    .getByRole("button", { name: "Use instance AI hosting", exact: true })
+    .click();
+  await page.getByText("Hosting: Instance provider", { exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Create credential", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Connect an agent", exact: true })
+    .click();
+  await page.getByText("Hosting: Instance provider", { exact: true }).waitFor();
+  await audit();
+  assert.equal(await page.title(), "Estrogen Dating");
+  assert.equal(new URL(page.url()).origin, origin);
+  assert.equal(await page.locator("vite-error-overlay").count(), 0);
+  await page.screenshot({
+    path: "/tmp/estrogen-hosting-mobile-qa.png",
+    fullPage: true,
+  });
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  await page.setViewportSize({ width: 1505, height: 1045 });
+  await page.screenshot({
+    path: "/tmp/estrogen-hosting-desktop-qa.png",
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Use my own service", exact: true })
+    .click();
+  await page.getByText("Hosting: Your own service", { exact: true }).waitFor();
   await page.getByRole("button", { name: "My profile", exact: true }).click();
   await audit();
   await page.getByLabel(/^Avatar/).setInputFiles({
@@ -382,7 +427,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: onboarding, discovery, mutual match, lost-response retry across reload, chat, mobile, unmatch, separate AI profile, credential issue/revoke, resized avatar, discovery pause. No runtime errors.",
+    "PASS: onboarding, discovery, mutual match, lost-response retry across reload, chat, mobile, unmatch, separate AI profile, credential issue/revoke, instance hosting enable/reload/disable on desktop and mobile, resized avatar, discovery pause. No runtime errors.",
   );
 } finally {
   await browser.close();

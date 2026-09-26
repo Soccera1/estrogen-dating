@@ -20,7 +20,10 @@ export function fail(
 ): never {
   throw new HTTPException(status, { message });
 }
-export async function readBytes(request: Request, limit: number) {
+export async function readBytes(
+  request: Pick<Request, "headers" | "body">,
+  limit: number,
+) {
   if (Number(request.headers.get("content-length")) > limit)
     fail(413, "Upload is too large.");
   const reader = request.body?.getReader();
