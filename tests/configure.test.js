@@ -89,14 +89,73 @@ describe("interactive deployment setup", () => {
       "",
       "client",
       "yes",
+      "custom",
       "http://invalid.example",
       "https://model.example/v1/chat/completions",
       "my-model",
     ]);
     expect(result.worker.env.AI_API_KEY).toEqual({ type: "secret" });
     expect(result.worker.env.AI_MODEL.value).toBe("my-model");
+    const rerun = await configure(Array(13).fill(""), result);
+    expect(rerun.result).toEqual(result);
     const disabled = await configure([...Array(9).fill(""), "no"], result);
     expect(disabled.result.worker.env.AI_ENDPOINT).toBeUndefined();
+  });
+  it("defaults to OpenRouter, validates model IDs and preserves setup on rerun", async () => {
+    const { result, messages } = await configure([
+      account,
+      "",
+      "",
+      "",
+      database,
+      "",
+      "my-account",
+      "",
+      "client",
+      "yes",
+      "invalid-provider",
+      "",
+      "invalid-model",
+      "vendor/chat-model",
+    ]);
+    expect(result.worker.env.AI_ENDPOINT.value).toBe(
+      "https://openrouter.ai/api/v1/chat/completions",
+    );
+    expect(result.worker.env.AI_MODEL.value).toBe("vendor/chat-model");
+    expect(result.worker.env.AI_API_KEY).toEqual({ type: "secret" });
+    expect(messages.join("\n")).toContain(
+      "https://openrouter.ai/settings/keys",
+    );
+    expect(messages.join("\n")).toContain("--secrets-file");
+    expect((await configure(Array(12).fill(""), result)).result).toEqual(
+      result,
+    );
+    const custom = await configure(
+      [
+        ...Array(10).fill(""),
+        "custom",
+        "",
+        "https://model.example/v1/chat/completions",
+        "",
+        "local-model",
+      ],
+      result,
+    );
+    expect(custom.result.worker.env.AI_ENDPOINT.value).toBe(
+      "https://model.example/v1/chat/completions",
+    );
+    expect(custom.result.worker.env.AI_MODEL.value).toBe("local-model");
+    const switched = await configure(
+      [...Array(10).fill(""), "openrouter", "", "vendor/new-model"],
+      custom.result,
+    );
+    expect(switched.result.worker.env.AI_ENDPOINT.value).toBe(
+      "https://openrouter.ai/api/v1/chat/completions",
+    );
+    expect(switched.result.worker.env.AI_MODEL.value).toBe("vendor/new-model");
+    const disabled = await configure([...Array(9).fill(""), "no"], result);
+    for (const name of ["AI_ENDPOINT", "AI_MODEL", "AI_API_KEY"])
+      expect(disabled.result.worker.env[name]).toBeUndefined();
   });
   it("protects the shared template", () => {
     const before = readFileSync("deployment.json", "utf8");

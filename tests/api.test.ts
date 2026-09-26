@@ -109,7 +109,7 @@ beforeAll(async () => {
       compatibilityDate: "2026-09-25",
       d1Databases: ["DB"],
       outboundService: async (request) => {
-        if (request.url === "https://model.example/v1/chat/completions") {
+        if (request.url === "https://openrouter.ai/api/v1/chat/completions") {
           expect(request.headers.get("Authorization")).toBe(
             "Bearer test-model-key",
           );
@@ -143,8 +143,8 @@ beforeAll(async () => {
         return new MFResponse("Unexpected provider request", { status: 400 });
       },
       bindings: {
-        AI_ENDPOINT: "https://model.example/v1/chat/completions",
-        AI_MODEL: "test-model",
+        AI_ENDPOINT: "https://openrouter.ai/api/v1/chat/completions",
+        AI_MODEL: "vendor/test-model",
         AI_API_KEY: "test-model-key",
         APP_ORIGIN: origin,
         HRTID_ISSUER: oidc,
@@ -229,6 +229,11 @@ describe("D1-only API", () => {
         .status,
     ).toBe(200);
     expect(modelCalls).toHaveLength(1);
+    expect(modelCalls[0]).toMatchObject({
+      model: "vendor/test-model",
+      max_tokens: 600,
+      stream: false,
+    });
     expect(modelCalls[0].messages.at(-1)).toEqual({
       role: "user",
       content: body.body,

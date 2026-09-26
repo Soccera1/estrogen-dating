@@ -1,6 +1,6 @@
 # Estrogen Dating
 
-React + Vite + TypeScript frontend, Hono Worker, and one D1 database. No KV, R2, hosted models, paid bindings, or fictional production profiles.
+React + Vite + TypeScript frontend, Hono Worker, and one D1 database. No KV, R2, paid bindings, or fictional production profiles. Optional AI hosting connects to OpenRouter or your own compatible model service.
 
 ## Product
 
@@ -63,7 +63,27 @@ The template intentionally fails remote checks until its placeholders are replac
 
 ## Optional instance AI hosting
 
-Run `npm run configure` and answer **yes** to **Offer instance AI hosting**. Supply the full HTTPS chat completions endpoint (for example `https://models.example.com/v1/chat/completions`) and model ID. This supports the non-streaming Chat Completions protocol, including self-hosted compatible servers such as [vLLM](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/). The endpoint must accept system/user/assistant messages and `max_tokens`, and return `choices[0].message.content` as text.
+### OpenRouter setup
+
+1. Run `npm run configure`, answer **yes** to **Offer instance AI hosting**, and accept **openrouter** as the provider. Setup fills in `https://openrouter.ai/api/v1/chat/completions` automatically.
+2. Choose a text chat model from the [OpenRouter model catalog](https://openrouter.ai/models) and paste its full `provider/model` ID. Setup requires an explicit model choice; it does not choose a paid model for you.
+3. Create an [OpenRouter API key](https://openrouter.ai/settings/keys). Save it in a private JSON file outside the repository with restrictive permissions:
+
+   ```json
+   { "AI_API_KEY": "YOUR_OPENROUTER_API_KEY" }
+   ```
+
+   Include `HRTID_CLIENT_SECRET` in the same file if your client requires it. The Worker uses `AI_API_KEY` for the OpenRouter key; no separate `OPENROUTER_API_KEY` binding is needed.
+4. Run `npm run deploy -- --secrets-file /path/to/private-secrets.json`.
+5. In the app, complete your AI profile, open **Connect an agent**, and choose **Use instance AI hosting**. A human message in a mutual match will request a reply.
+
+The integration uses OpenRouter's [Chat Completions API](https://openrouter.ai/docs/quickstart) directly; no SDK or separate agent server is required. OpenRouter supplies model inference; Cloudflare still hosts the app and database. Manage model spending and data policies in OpenRouter separately from Cloudflare billing. If replies fail, check your key, credits, model availability and provider limits; the saved human message can be retried.
+
+### Custom model service
+
+Run `npm run configure`, answer **yes** to **Offer instance AI hosting**, and choose **custom** as the provider. Supply the full HTTPS chat completions endpoint (for example `https://models.example.com/v1/chat/completions`) and model ID. This supports the non-streaming Chat Completions protocol, including self-hosted compatible servers such as [vLLM](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/). The endpoint must accept system/user/assistant messages and `max_tokens`, and return `choices[0].message.content` as text.
+
+### Hosting configuration and behavior
 
 Setup adds these Worker bindings (omit all three to disable the feature):
 

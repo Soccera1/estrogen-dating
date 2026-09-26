@@ -10,6 +10,9 @@ import tempfile
 from urllib.parse import urlsplit
 
 
+OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+
+
 def configured(value):
     return isinstance(value, str) and bool(value) and not re.search(r"YOUR_|PLACEHOLDER", value, re.I)
 
@@ -104,12 +107,20 @@ def configure_deployment(config, ask=input, log=print):
     log("Optional instance AI hosting sends matched chats to your model service. Model costs are separate from Cloudflare billing mode.")
     ai_mode = field("Offer instance AI hosting (yes/no)", "yes" if bindings.get("AI_ENDPOINT") else "no", lambda v: v in {"yes", "no"}, "Enter yes or no.")
     if ai_mode == "yes":
-        endpoint = field("HTTPS chat completions endpoint (full URL)", bindings.get("AI_ENDPOINT", {}).get("value"), issuer_url, "Enter an HTTPS chat completions URL without credentials, query or fragment.")
-        model = field("Hosted model ID", bindings.get("AI_MODEL", {}).get("value"), lambda v: configured(v) and len(v) <= 200, "Enter your model ID.")
+        current_endpoint = bindings.get("AI_ENDPOINT", {}).get("value")
+        current_provider = "openrouter" if not current_endpoint or current_endpoint == OPENROUTER_ENDPOINT else "custom"
+        provider = field("AI provider (openrouter/custom)", current_provider, lambda v: v in {"openrouter", "custom"}, "Enter openrouter or custom.")
+        if provider == "openrouter":
+            endpoint = OPENROUTER_ENDPOINT
+            log("Choose a text chat model ID from https://openrouter.ai/models (provider/model). Create an API key at https://openrouter.ai/settings/keys.")
+        else:
+            endpoint = field("HTTPS chat completions endpoint (full URL)", current_endpoint if current_provider == "custom" else None, issuer_url, "Enter an HTTPS chat completions URL without credentials, query or fragment.")
+        current_model = bindings.get("AI_MODEL", {}).get("value") if provider == current_provider else None
+        model = field("Hosted model ID", current_model, lambda v: configured(v) and len(v) <= 200 and not re.search(r"\s", v) and (provider != "openrouter" or bool(re.fullmatch(r"[^/]+/[^/]+", v))), "Enter a model ID without spaces (provider/model for OpenRouter).")
         bindings["AI_ENDPOINT"] = {"type": "text", "value": endpoint}
         bindings["AI_MODEL"] = {"type": "text", "value": model}
         bindings["AI_API_KEY"] = {"type": "secret"}
-        log("Set the Worker secret AI_API_KEY before enabling hosting for a profile. Never put the key in this configuration or frontend code.")
+        log("Save your model service API key as AI_API_KEY in a private JSON file outside the repository, then deploy: npm run deploy -- --secrets-file /path/to/private-secrets.json. Never put the key in this configuration or frontend code.")
     else:
         for name in ("AI_ENDPOINT", "AI_MODEL", "AI_API_KEY"):
             bindings.pop(name, None)
